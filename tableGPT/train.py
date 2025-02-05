@@ -3,13 +3,11 @@ from typing import List, Dict, Tuple
 import pandas as pd
 from tqdm import tqdm
 import random
-
+import numpy as np
+import torch
 
 from collections import defaultdict
 from typing import List, Dict, Tuple
-import pandas as pd
-from tqdm import tqdm
-import random
 
 from transformers import (
     BitsAndBytesConfig,
@@ -18,13 +16,53 @@ from transformers import (
     GenerationConfig
 )
 
-import pandas as pd
-import torch
 
 
-import numpy as np
-from tqdm import tqdm
-from datetime import datetime
+llm_name = "tablegpt/TableGPT2-7B"
+
+# We want to use 4bit quantization to save memory
+quantization_config = BitsAndBytesConfig(
+    load_in_8bit=False, load_in_4bit=True
+)
+
+# Load tokenizer
+tokenizer = AutoTokenizer.from_pretrained(llm_name, padding_side="left")
+# Prevent some transformers specific issues.
+tokenizer.use_default_system_prompt = False
+tokenizer.pad_token_id = tokenizer.eos_token_id
+
+# Load LLM.
+llm = AutoModelForCausalLM.from_pretrained(
+    llm_name,
+    quantization_config=quantization_config,
+    device_map={"": 0}, # load all the model layers on GPU 0
+    torch_dtype=torch.bfloat16, # float precision
+)
+# Set LLM on eval mode.
+llm.eval()
+
+generation_config = GenerationConfig(
+  max_new_tokens=512,
+  do_sample=False,
+  # do_sample=True,
+  # temperature=.7,
+  # top_p=.8,
+  # top_k=20,
+  eos_token_id=tokenizer.eos_token_id,
+  pad_token_id=tokenizer.pad_token_id,
+)
+
+data_smallpedia = pd.read_csv('./tkgl-smallpedia/tkgl-smallpedia_edgelist_named.csv')
+data_smallpedia.drop('Unnamed: 0', axis=1, inplace=True)
+
+def extract_train(df, last_year):
+  df_train = df[df['ts'] < last_year]
+  df_test = df[df['ts'] == last_year + 1]
+  return df_train, df_test
+
+df_train, df_test = extract_train(data_smallpedia, 1925)
+
+print('Content loaded')
 
 
 def generate_answer(prompt, llm=llm, generation_config=generation_config):
